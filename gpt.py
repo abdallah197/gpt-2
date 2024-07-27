@@ -12,6 +12,18 @@ class GPTConfig:
     n_head: int = 6
     n_embed = 384
 
+class MLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.c_fc = nn.Linear(config.n_embed, config.n_embed * 4)
+        self.gelu = nn.GELU(approximate='tanh')
+        self.c_proj = nn.Linear(config.n_embed * 4, config.n_embed)
+
+    def forward(self, x):
+        x = self.gelu(self.c_fc(x))
+        x = self.c_proj(x)
+        return x
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
