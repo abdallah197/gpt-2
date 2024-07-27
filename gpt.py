@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
@@ -11,6 +12,39 @@ class GPTConfig:
     n_layer: int = 6
     n_head: int = 6
     n_embed = 384
+
+class CausalSelfAttention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        assert config.n_embed % config.n_head == 0
+        self.n_head = config.n_head
+        self.c_attn =  nn.Linear(config.n_embed, config.n_embed * 3)
+
+        self.c_proj = nn.Linear(config.n_embed, config.n_embed)
+        self.dropout = nn.Dropout(config.dropout)
+        self.register_buffer('bias', torch.tril(torch.ones(config.block_size,
+                                                           config.block_size))).view(1, 1, config.block_size,
+                                                                                     config.block_size)
+
+    def forward(self, x):
+        B, T, C = x.shape
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.config.n_embed, dim=2)
+        q = q.view(B, -1, self.h_embed, self.config.n_embed // self.n_head)
+        k = k.view(B, -1, self.h_embed, self.config.n_embed // self.n_head)
+        v = v.view(B, -1, self.h_embed, self.config.n_embed // self.n_head)
+
+
+        dk = k.shape[-1]
+        # calculate the scores
+        scores = (q @ k.transpose(-1, -2)) * (1.0 / math.sqrt(dk))
+        scores = scores.masked_fill_(self.bias[:, :, :T, :T] == 0, float('-inf'))
+        scores = F.softmax(scores, dim=-1)
+
+        p_scores = scores @ v # B, T, n_h, hd
+        p_scores = p_scores.tranpose(1, 2).contiguous().view(B, T, C)
+        return self.c_proj(p_scores)
 
 class MLP(nn.Module):
     def __init__(self, config):
