@@ -44,7 +44,7 @@ class CausalSelfAttention(nn.Module):
         scores = F.softmax(scores, dim=-1)
 
         p_scores = scores @ v  # B, T, n_h, hd
-        p_scores = p_scores.tranpose(1, 2).contiguous().view(B, T, C)
+        p_scores = p_scores.transpose(1, 2).contiguous().view(B, T, C)
         return self.c_proj(p_scores)
 
 
@@ -73,7 +73,7 @@ class Block(nn.Module):
 
     def forward(self, x):
         x = self.attn(self.ln_1(x)) + x
-        x = self.ffn(self.ln_2(x)) + x
+        x = self.mlp(self.ln_2(x)) + x
         return x
 
 
@@ -200,6 +200,6 @@ while x.size(1) < max_length:
 
 # print the generated text
 for i in range(num_sequences):
-    tokens = tokens[i, :max_length]
-    decoded = tokenizer(tokens)
+    entry = x[i, :max_length]
+    decoded = tokenizer(entry)
     print(decoded)
