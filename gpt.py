@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import transformers
 from torch.nn import functional as F
 
 
@@ -144,3 +145,8 @@ if torch.cuda.is_available():
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print(f"using device: {device}")
+
+torch.manual_seed(1337)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(1337)
+tokenizer = transformers.AutoTokenizer.from_pretrained('gpt2')
