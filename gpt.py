@@ -33,13 +33,13 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.shape
         qkv = self.c_attn(x)
         q, k, v = qkv.split(self.config.n_embd, dim=2)
-        q = q.view(B, -1, self.n_head, self.config.n_embd // self.n_head)
-        k = k.view(B, -1, self.n_head, self.config.n_embd // self.n_head)
-        v = v.view(B, -1, self.n_head, self.config.n_embd // self.n_head)
+        q = q.view(B, -1, self.n_head, self.config.n_embd // self.n_head).transpose(1, 2)
+        k = k.view(B, -1, self.n_head, self.config.n_embd // self.n_head).transpose(1, 2)
+        v = v.view(B, -1, self.n_head, self.config.n_embd // self.n_head).transpose(1, 2)
 
         dk = k.shape[-1]
         # calculate the scores
-        scores = (q @ k.transpose(-1, -2)) * (1.0 / math.sqrt(dk))
+        scores = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(dk))
         scores = scores.masked_fill_(self.bias[:, :, :T, :T] == 0, float('-inf'))
         scores = F.softmax(scores, dim=-1)
 
