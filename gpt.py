@@ -169,9 +169,9 @@ print(f"using device: {device}")
 torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
-tokenizer = transformers.AutoTokenizer.from_pretrained('gpt2')
+tokenizer = transformers.AutoTokenizer.from_pretrained('openai-community/gpt2')
 
-model = GPT.from_pretrained('gpt2')
+model = GPT.from_pretrained('openai-community/gpt2')
 model.eval()
 model.to(device)
 
