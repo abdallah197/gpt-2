@@ -25,7 +25,6 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, config.n_embd * 3)
 
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.dropout = nn.Dropout(config.dropout)
         self.register_buffer('bias', torch.tril(torch.ones(config.block_size,
                                                            config.block_size))).view(1, 1, config.block_size,
                                                                                      config.block_size)
