@@ -94,7 +94,7 @@ class GPT(nn.Module):
     @classmethod
     def from_pretrained(cls, model_type):
         """Loads pretrained GPT-2 model weights from huggingface"""
-        assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
+        assert model_type.split('/')[-1] in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         from transformers import GPT2LMHeadModel
         print("loading weights from pretrained gpt: %s" % model_type)
 
@@ -104,7 +104,7 @@ class GPT(nn.Module):
             'gpt2-medium': dict(n_layer=24, n_head=16, n_embd=1024),  # 350M params
             'gpt2-large': dict(n_layer=36, n_head=20, n_embd=1280),  # 774M params
             'gpt2-xl': dict(n_layer=48, n_head=25, n_embd=1600),  # 1558M params
-        }[model_type]
+        }[model_type.split('/')[-1]]
         config_args['vocab_size'] = 50257  # always 50257 for GPT model checkpoints
         config_args['block_size'] = 1024  # always 1024 for GPT model checkpoints
         # create a from-scratch initialized minGPT model
