@@ -21,6 +21,7 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         self.config = config
         assert config.n_embd % config.n_head == 0
+        self.h_embd =  config.n_embd // config.n_head
         self.n_head = config.n_head
         self.c_attn = nn.Linear(config.n_embd, config.n_embd * 3)
 
@@ -33,9 +34,9 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.shape
         qkv = self.c_attn(x)
         q, k, v = qkv.split(self.config.n_embd, dim=2)
-        q = q.view(B, -1, self.h_embed, self.config.n_embd // self.n_head)
-        k = k.view(B, -1, self.h_embed, self.config.n_embd // self.n_head)
-        v = v.view(B, -1, self.h_embed, self.config.n_embd // self.n_head)
+        q = q.view(B, -1, self.h_embd, self.config.n_embd // self.n_head)
+        k = k.view(B, -1, self.h_embd, self.config.n_embd // self.n_head)
+        v = v.view(B, -1, self.h_embd, self.config.n_embd // self.n_head)
 
         dk = k.shape[-1]
         # calculate the scores
@@ -177,7 +178,7 @@ model.to(device)
 tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_ids']
 max_length = 30
 num_sequences = 5
-tokens = tokens.unsqueeze(0).repeat(5, 1)
+tokens = tokens.repeat(5, 1)
 x = tokens.to(device)
 
 while x.size(1) < max_length:
