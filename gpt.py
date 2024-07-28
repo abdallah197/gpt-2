@@ -20,11 +20,11 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        assert config.n_embed % config.n_head == 0
+        assert config.n_embd % config.n_head == 0
         self.n_head = config.n_head
-        self.c_attn = nn.Linear(config.n_embed, config.n_embed * 3)
+        self.c_attn = nn.Linear(config.n_embd, config.n_embd * 3)
 
-        self.c_proj = nn.Linear(config.n_embed, config.n_embed)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         self.dropout = nn.Dropout(config.dropout)
         self.register_buffer('bias', torch.tril(torch.ones(config.block_size,
                                                            config.block_size))).view(1, 1, config.block_size,
@@ -33,10 +33,10 @@ class CausalSelfAttention(nn.Module):
     def forward(self, x):
         B, T, C = x.shape
         qkv = self.c_attn(x)
-        q, k, v = qkv.split(self.config.n_embed, dim=2)
-        q = q.view(B, -1, self.h_embed, self.config.n_embed // self.n_head)
-        k = k.view(B, -1, self.h_embed, self.config.n_embed // self.n_head)
-        v = v.view(B, -1, self.h_embed, self.config.n_embed // self.n_head)
+        q, k, v = qkv.split(self.config.n_embd, dim=2)
+        q = q.view(B, -1, self.h_embed, self.config.n_embd // self.n_head)
+        k = k.view(B, -1, self.h_embed, self.config.n_embd // self.n_head)
+        v = v.view(B, -1, self.h_embed, self.config.n_embd // self.n_head)
 
         dk = k.shape[-1]
         # calculate the scores
@@ -53,9 +53,9 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.c_fc = nn.Linear(config.n_embed, config.n_embed * 4)
+        self.c_fc = nn.Linear(config.n_embd, config.n_embd * 4)
         self.gelu = nn.GELU(approximate='tanh')
-        self.c_proj = nn.Linear(config.n_embed * 4, config.n_embed)
+        self.c_proj = nn.Linear(config.n_embd * 4, config.n_embd)
 
     def forward(self, x):
         x = self.gelu(self.c_fc(x))
@@ -69,8 +69,8 @@ class Block(nn.Module):
         self.config = config
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
-        self.ln_1 = nn.LayerNorm(config.n_embed)
-        self.ln_2 = nn.LayerNorm(config.n_embed)
+        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.ln_2 = nn.LayerNorm(config.n_embd)
 
     def forward(self, x):
         x = self.attn(self.ln_1(x)) + x
@@ -84,12 +84,12 @@ class GPT(nn.Module):
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
-            wte=nn.Embedding(config.vocab_size, config.n_embed),
-            wpe=nn.Embedding(config.block_size, config.n_embed),
+            wte=nn.Embedding(config.vocab_size, config.n_embd),
+            wpe=nn.Embedding(config.block_size, config.n_embd),
             h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f=nn.LayerNorm(config.n_embed)
+            ln_f=nn.LayerNorm(config.n_embd)
         ))
-        self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
     @classmethod
     def from_pretrained(cls, model_type):
