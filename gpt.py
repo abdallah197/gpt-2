@@ -3,10 +3,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-
-ifrom
-torch.nn
-import functional as F
+from torch.nn import functional as F
 
 
 @dataclass
