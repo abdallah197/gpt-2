@@ -150,3 +150,37 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 tokenizer = transformers.AutoTokenizer.from_pretrained('gpt2')
+
+model = GPT.from_pretrained('gpt2')
+model.eval()
+model.to(device)
+
+tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_ids']
+max_length = 30
+num_sequences = 5
+tokens = tokens.unsqueeze(0).repeat(5, 1)
+x = tokens.to(device)
+
+while x.size(1) < max_length:
+    logits = model(x) # B, T,C
+
+    logits = logits[:, -1, :] # B, 1, C
+
+    probs = F.softmax(logits, dim=-1)
+
+
+    # get the top k tokens
+    top_probs, top_indices = torch.topk(probs, 50, dim=-1)
+
+    ix = torch.multinomial(top_probs, 1)
+
+    # gagther the corrospunding indicies
+    xcol = torch.gather(top_indices, -1, ix) # B, 1
+
+    x = torch.cat((x, xcol), dim=1)
+
+# print the generated text
+for i in range(num_sequences):
+    tokens = tokens[i, :max_length]
+    decoded = tokenizer(tokens)
+    print(decoded)
