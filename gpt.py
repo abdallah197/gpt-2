@@ -28,6 +28,7 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer('bias', torch.tril(torch.ones(config.block_size,
                                                            config.block_size)).view(1, 1, config.block_size,
                                                                                      config.block_size))
+        self.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
         B, T, C = x.shape
@@ -37,13 +38,14 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, -1, self.n_head, self.config.n_embd // self.n_head).transpose(1, 2)
         v = v.view(B, -1, self.n_head, self.config.n_embd // self.n_head).transpose(1, 2)
 
-        dk = k.shape[-1]
-        # calculate the scores
-        scores = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(dk))
-        scores = scores.masked_fill_(self.bias[:, :, :T, :T] == 0, float('-inf'))
-        scores = F.softmax(scores, dim=-1)
-
-        p_scores = scores @ v  # B, T, n_h, hd
+        # dk = k.shape[-1]
+        # # calculate the scores
+        # scores = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(dk))
+        # scores = scores.masked_fill_(self.bias[:, :, :T, :T] == 0, float('-inf'))
+        # scores = F.softmax(scores, dim=-1)
+        #
+        # p_scores = scores @ v  # B, T, n_h, hd
+        p_scores = F.scaled_dot_product_attention(q, k, v)
         p_scores = p_scores.transpose(1, 2).contiguous().view(B, T, C)
         return self.c_proj(p_scores)
 
@@ -55,6 +57,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, config.n_embd * 4)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(config.n_embd * 4, config.n_embd)
+        self.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
         x = self.gelu(self.c_fc(x))
@@ -188,8 +191,8 @@ if torch.cuda.is_available():
 tokenizer = transformers.AutoTokenizer.from_pretrained('openai-community/gpt2')
 
 model = GPT.from_pretrained('openai-community/gpt2')
-model.eval()
 model.to(device)
+model = torch.compile(model)
 
 tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_ids']
 max_length = 30
@@ -214,9 +217,48 @@ while x.size(1) < max_length:
     xcol = torch.gather(top_indices, -1, ix) # B, 1
 
     x = torch.cat((x, xcol), dim=1)
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(42)
 
+class DataLoaderLite:
+    def __init__(self, B, T, tokenizer):
+        self.B = B
+        self.T = T
+        self.current_positon = 0
+        with open('input.txt', 'r') as f:
+            text = f.read()
+        self.tokens = tokenizer(text, return_tensors='pt')['input_ids'].squeeze(0)
+
+    def get_next_batch(self):
+        context_length = self.B * self.T
+
+        buffer = self.tokens[self.current_positon : self.current_positon + context_length + 1]
+
+        x = buffer[:-1].view(self.B, self.T)
+        y = buffer[1:].view(self.B, self.T)
+        self.current_positon += context_length
+
+        if self.current_positon + (self.B * self.T + 1) > len(self.tokens):
+            self.current_positon = 0
+        # sample a portion of context_length as X, Y
 # print the generated text
-for i in range(num_sequences):
-    entry = x[i, :max_length]
-    decoded = tokenizer(entry)
-    print(decoded)
+# for i in range(num_sequences):
+#     entry = x[i, :max_length]
+#     decoded = tokenizer(entry)
+#     print(decoded)
+
+steps = 50
+data_loader = DataLoaderLite(B=16, T=512, tokenizer=tokenizer)
+optimzer = torch.optim.AdamW(params=model.parameters(), lr=3e-6)
+for i in range(steps):
+
+    x, y = data_loader.get_next_batch()
+    x, y = x.to(device), y.to(device)
+    optimzer.zero_grad()
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x, y)
+    loss.backward()
+    optimzer.step()
+    print(f"step: {i}, loss: {loss.item()}")
+
