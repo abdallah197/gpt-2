@@ -163,8 +163,8 @@ class GPT(nn.Module):
         param_groups = {pn: p for pn, p in self.named_parameters()}
         param_groups = {pn: p for pn, p in param_groups.items() if p.requires_grad}
 
-        decay_p = {pn: p for p, pn in param_groups.items() if p.dim() > 1}
-        nodecay_p = {pn: p for p, pn in param_groups.items() if p.dim() <= 1}
+        decay_p = {pn: p for pn, p in param_groups.items() if p.dim() > 1}
+        nodecay_p = {pn: p for pn, p in param_groups.items() if p.dim() <= 1}
         optim_groups = {
             {"params": decay_p, "weight_decay": weight_decay},
             {"params": nodecay_p, "weight_decay": 0.0},
@@ -275,7 +275,7 @@ max_lr = min_lr * 10
 weight_decay = 0.01
 gradient_accumm_steps = 32
 
-optimizer  = model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
+optimizer = model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
 
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
