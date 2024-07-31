@@ -190,7 +190,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 tokenizer = transformers.AutoTokenizer.from_pretrained('openai-community/gpt2')
 
-model = GPT.from_pretrained('openai-community/gpt2')
+model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)
 model = torch.compile(model)
 
@@ -250,15 +250,24 @@ class DataLoaderLite:
 
 steps = 50
 data_loader = DataLoaderLite(B=16, T=512, tokenizer=tokenizer)
-optimzer = torch.optim.AdamW(params=model.parameters(), lr=3e-6)
+min_lr = 6e-5
+max_lr = min_lr * 10
+from math import ceil
+num_epochs = 3
+
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=max_lr)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
 
     x, y = data_loader.get_next_batch()
     x, y = x.to(device), y.to(device)
-    optimzer.zero_grad()
+    optimizer.zero_grad()
     with torch.autocast(device_type=device, dtype=torch.bfloat16):
         logits, loss = model(x, y)
     loss.backward()
-    optimzer.step()
-    print(f"step: {i}, loss: {loss.item()}")
+    norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
+    optimizer.step()
+    scheduler.step()
+    current_lr = scheduler.get_last_lr()[0]
+    print(f"step: {i}, loss: {loss.item()}, norm: {norm:.4f}, lr: {current_lr:.6f}")
 
