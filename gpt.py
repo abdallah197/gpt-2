@@ -269,7 +269,7 @@ class DataLoaderLite:
 #     print(decoded)
 
 steps = 50
-data_loader = DataLoaderLite(B=16, T=512, tokenizer=tokenizer)
+data_loader = DataLoaderLite(B=16, T=1024, tokenizer=tokenizer)
 min_lr = 6e-5
 max_lr = min_lr * 10
 weight_decay = 0.01
