@@ -1,3 +1,4 @@
+import inspect
 import math
 from dataclasses import dataclass
 
@@ -9,11 +10,11 @@ from torch.nn import functional as F
 
 @dataclass
 class GPTConfig:
-    block_size: int = 1024 # max sequence length
-    vocab_size: int = 50257 # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
-    n_layer: int = 12 # number of layers
-    n_head: int = 12 # number of heads
-    n_embd: int = 768 # embedding dimension
+    block_size: int = 1024  # max sequence length
+    vocab_size: int = 50257  # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
+    n_layer: int = 12  # number of layers
+    n_head: int = 12  # number of heads
+    n_embd: int = 768  # embedding dimension
 
 
 class CausalSelfAttention(nn.Module):
@@ -27,7 +28,7 @@ class CausalSelfAttention(nn.Module):
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         self.register_buffer('bias', torch.tril(torch.ones(config.block_size,
                                                            config.block_size)).view(1, 1, config.block_size,
-                                                                                     config.block_size))
+                                                                                    config.block_size))
         self.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
@@ -159,6 +160,23 @@ class GPT(nn.Module):
 
         return model
 
+    def configue_optimizers(self, weight_decay, lr, device):
+        param_groups = {pn: p for pn, p in self.named_parameters()}
+        param_groups = {pn: p for pn, p in param_groups.items() if p.requires_grad}
+
+        decay_p = {pn: p for p, pn in param_groups.items() if p.dim() > 1}
+        nodecay_p = {pn: p for p, pn in param_groups.items() if p.dim() <= 1}
+        optim_groups = {
+            {"params": decay_p, "weight_decay": weight_decay},
+            {"params": nodecay_p, "weight_decay": 0.0},
+        }
+
+        fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and "cuda" in device
+
+        optimizer = torch.optim.AdamW(optim_groups, lr=lr, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        return optimizer
+
     def forward(self, idx, targets=None):
         # idx is of shape (B, T)
         B, T = idx.size()
@@ -178,6 +196,7 @@ class GPT(nn.Module):
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
+
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -201,12 +220,11 @@ tokens = tokens.repeat(5, 1)
 x = tokens.to(device)
 
 while x.size(1) < max_length:
-    logits, _ = model(x) # B, T,C
+    logits, _ = model(x)  # B, T,C
 
-    logits = logits[:, -1, :] # B, 1, C
+    logits = logits[:, -1, :]  # B, 1, C
 
     probs = F.softmax(logits, dim=-1)
-
 
     # get the top k tokens
     top_probs, top_indices = torch.topk(probs, 50, dim=-1)
@@ -214,12 +232,13 @@ while x.size(1) < max_length:
     ix = torch.multinomial(top_probs, 1)
 
     # gagther the corrospunding indicies
-    xcol = torch.gather(top_indices, -1, ix) # B, 1
+    xcol = torch.gather(top_indices, -1, ix)  # B, 1
 
     x = torch.cat((x, xcol), dim=1)
 torch.manual_seed(42)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(42)
+
 
 class DataLoaderLite:
     def __init__(self, B, T, tokenizer):
@@ -233,7 +252,7 @@ class DataLoaderLite:
     def get_next_batch(self):
         context_length = self.B * self.T
 
-        buffer = self.tokens[self.current_positon : self.current_positon + context_length + 1]
+        buffer = self.tokens[self.current_positon: self.current_positon + context_length + 1]
 
         x = buffer[:-1].view(self.B, self.T)
         y = buffer[1:].view(self.B, self.T)
@@ -242,6 +261,8 @@ class DataLoaderLite:
         if self.current_positon + (self.B * self.T + 1) > len(self.tokens):
             self.current_positon = 0
         # sample a portion of context_length as X, Y
+
+
 # print the generated text
 # for i in range(num_sequences):
 #     entry = x[i, :max_length]
@@ -252,13 +273,13 @@ steps = 50
 data_loader = DataLoaderLite(B=16, T=512, tokenizer=tokenizer)
 min_lr = 6e-5
 max_lr = min_lr * 10
-from math import ceil
+weight_decay = 0.01
 num_epochs = 3
 
-optimizer = torch.optim.AdamW(params=model.parameters(), lr=max_lr)
+optimizer = m = model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
+
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
-
     x, y = data_loader.get_next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
@@ -270,4 +291,3 @@ for i in range(steps):
     scheduler.step()
     current_lr = scheduler.get_last_lr()[0]
     print(f"step: {i}, loss: {loss.item()}, norm: {norm:.4f}, lr: {current_lr:.6f}")
-
