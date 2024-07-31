@@ -1,5 +1,4 @@
 import inspect
-import math
 from dataclasses import dataclass
 
 import torch
@@ -274,20 +273,27 @@ data_loader = DataLoaderLite(B=16, T=512, tokenizer=tokenizer)
 min_lr = 6e-5
 max_lr = min_lr * 10
 weight_decay = 0.01
-num_epochs = 3
+gradient_accumm_steps = 32
 
 optimizer = m = model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
 
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
-    x, y = data_loader.get_next_batch()
-    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-        logits, loss = model(x, y)
-    loss.backward()
+    loss_accum = 0.0
+    for _ in range(gradient_accumm_steps):
+        x, y = data_loader.get_next_batch()
+        x, y = x.to(device), y.to(device)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y)
+        loss = loss / gradient_accumm_steps
+        loss_accum += loss.detach()
+        loss.backward()
     norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
     optimizer.step()
     scheduler.step()
     current_lr = scheduler.get_last_lr()[0]
-    print(f"step: {i}, loss: {loss.item()}, norm: {norm:.4f}, lr: {current_lr:.6f}")
+    # synchronize is called because GPU operations are asyn and Cuda can pass output to CPU before it finishes its tasks
+    torch.cuda.synchronize()
+    print(
+        f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}")
