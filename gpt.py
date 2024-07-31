@@ -160,8 +160,8 @@ class GPT(nn.Module):
         return model
 
     def configue_optimizers(self, weight_decay, lr, device):
-        param_groups = {pn: p for pn, p in self.named_parameters()}
-        param_groups = {pn: p for pn, p in param_groups.items() if p.requires_grad}
+        param_groups = [p for pn, p in self.named_parameters()]
+        param_groups = [p for pn, p in param_groups.items() if p.requires_grad]
 
         decay_p = {pn: p for pn, p in param_groups.items() if p.dim() > 1}
         nodecay_p = {pn: p for pn, p in param_groups.items() if p.dim() <= 1}
