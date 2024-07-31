@@ -165,10 +165,10 @@ class GPT(nn.Module):
 
         decay_p = {pn: p for pn, p in param_groups.items() if p.dim() > 1}
         nodecay_p = {pn: p for pn, p in param_groups.items() if p.dim() <= 1}
-        optim_groups = {
+        optim_groups = [
             {"params": decay_p, "weight_decay": weight_decay},
             {"params": nodecay_p, "weight_decay": 0.0},
-        }
+        ]
 
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and "cuda" in device
