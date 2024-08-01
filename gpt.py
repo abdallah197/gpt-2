@@ -329,9 +329,10 @@ for i in range(steps):
     # synchronize is called because GPU operations are asyn and Cuda can pass output to CPU before it finishes its tasks
     torch.cuda.synchronize()
     tokens_processed = data_loader.B * data_loader.T * dpp_world_size * gradient_accumm_steps
+    tok_per_sec = tokens_processed / dt
     if master_process:
         print(
-            f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}, time: {dt * 1000:.2f} ms, tokens: {tokens_processed}")
+            f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}, time: {dt * 1000:.2f} ms, tok/sec: {tok_per_sec:.2f}")
 
 if dpp:
     dist.destroy_process_group()
