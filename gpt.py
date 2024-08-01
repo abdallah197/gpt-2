@@ -283,7 +283,7 @@ tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_
 max_length = 30
 num_sequences = 5
 tokens = tokens.repeat(5, 1)
-data_loader = DataLoaderLite(B=B, T=T, tokenizer=tokenizer, rank_process=dpp_rank, world_size=dpp_world_size)
+data_loader = DataLoaderLite(B=B, T=T, tokenizer=tokenizer, rank_process=dpp_rank, num_processes=dpp_world_size)
 
 # x = tokens.to(device)
 # while x.size(1) < max_length:
