@@ -260,6 +260,7 @@ class DataLoaderLite:
         if self.current_positon + (self.B * self.T + 1) > len(self.tokens):
             self.current_positon = 0
         # sample a portion of context_length as X, Y
+        return x, y
 
 
 # print the generated text
