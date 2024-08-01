@@ -1,11 +1,14 @@
 import inspect
+import os
 import time
 from dataclasses import dataclass
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import transformers
 from torch.nn import functional as F
+from torch.nn.parallel import DistributedDataParallel as DPP
 
 
 @dataclass
@@ -198,68 +201,28 @@ class GPT(nn.Module):
         return logits, loss
 
 
-if torch.cuda.is_available():
-    device = "cuda"
-elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-    device = "mps"
-print(f"using device: {device}")
-
-torch.manual_seed(1337)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(1337)
-tokenizer = transformers.AutoTokenizer.from_pretrained('openai-community/gpt2')
-
-model = GPT(GPTConfig(vocab_size=50304))
-model.to(device)
-model = torch.compile(model)
-
-tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_ids']
-max_length = 30
-num_sequences = 5
-tokens = tokens.repeat(5, 1)
-x = tokens.to(device)
-
-while x.size(1) < max_length:
-    logits, _ = model(x)  # B, T,C
-
-    logits = logits[:, -1, :]  # B, 1, C
-
-    probs = F.softmax(logits, dim=-1)
-
-    # get the top k tokens
-    top_probs, top_indices = torch.topk(probs, 50, dim=-1)
-
-    ix = torch.multinomial(top_probs, 1)
-
-    # gagther the corrospunding indicies
-    xcol = torch.gather(top_indices, -1, ix)  # B, 1
-
-    x = torch.cat((x, xcol), dim=1)
-torch.manual_seed(42)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(42)
-
-
 class DataLoaderLite:
-    def __init__(self, B, T, tokenizer):
+    def __init__(self, B, T, tokenizer, rank_process, num_processes):
         self.B = B
         self.T = T
-        self.current_positon = 0
+        self.rank_process = rank_process
+        self.num_processes = num_processes
+        self.current_positon = self.B * self.T * self.rank_process
         with open('input.txt', 'r') as f:
             text = f.read()
         self.tokens = tokenizer(text, return_tensors='pt')['input_ids'].squeeze(0)
 
     def get_next_batch(self):
-        context_length = self.B * self.T
+        B, T = self.B, self.T
 
-        buffer = self.tokens[self.current_positon: self.current_positon + context_length + 1]
+        buffer = self.tokens[self.current_positon: self.current_positon + B * T + 1]
 
         x = buffer[:-1].view(self.B, self.T)
         y = buffer[1:].view(self.B, self.T)
-        self.current_positon += context_length
+        self.current_positon += B * T * self.num_processes
 
-        if self.current_positon + (self.B * self.T + 1) > len(self.tokens):
-            self.current_positon = 0
+        if self.current_positon + (B * T * self.num_processes + 1) > len(self.tokens):
+            self.current_positon = B * T * self.rank_process
         # sample a portion of context_length as X, Y
         return x, y
 
@@ -270,28 +233,94 @@ class DataLoaderLite:
 #     decoded = tokenizer(entry)
 #     print(decoded)
 
+dpp = int(os.environ.get('RANK', -1)) != -1
+
+if dpp:
+    dist.init_process_group("nccl")
+    dpp_world_size = int(os.environ['WORLD_SIZE'])
+    dpp_local_rank = int(os.environ['LOCAL_RANK'])
+    dpp_rank = int(os.environ['RANK'])
+    device = f'cuda:{dpp_local_rank}'
+    torch.cuda.set_device(device)
+    master_process = dpp_rank == 0
+else:
+    device = 'cpu'
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    print(f"using device: {device}")
+    dpp_world_size = 1
+    dpp_local_rank = 0
+    master_process = True
+
+total_batch_size = 524288  # num of tokens in one batch, 2**19, 0.5M in num of tokens
+B = 16
+T = 1024
+assert total_batch_size % (B * T * dpp_world_size) == 0
+gradient_accumm_steps = total_batch_size // (B * T * dpp_world_size)
+tokenizer = transformers.AutoTokenizer.from_pretrained('openai-community/gpt2')
+
 steps = 50
-data_loader = DataLoaderLite(B=16, T=1024, tokenizer=tokenizer)
 min_lr = 6e-5
 max_lr = min_lr * 10
 weight_decay = 0.01
-gradient_accumm_steps = 32
 
-optimizer = model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
+torch.manual_seed(1337)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(1337)
+
+model = GPT(GPTConfig(vocab_size=50304))
+model.to(device)
+model = torch.compile(model)
+model = DPP(model, device_ids=[dpp_local_rank])
+raw_model = model.module
+
+optimizer = raw_model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
+tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_ids']
+max_length = 30
+num_sequences = 5
+tokens = tokens.repeat(5, 1)
+data_loader = DataLoaderLite(B=B, T=T, tokenizer=tokenizer, rank_process=dpp_rank, world_size=dpp_world_size)
+
+# x = tokens.to(device)
+# while x.size(1) < max_length:
+#     logits, _ = model(x)  # B, T,C
+#
+#     logits = logits[:, -1, :]  # B, 1, C
+#
+#     probs = F.softmax(logits, dim=-1)
+#
+#     # get the top k tokens
+#     top_probs, top_indices = torch.topk(probs, 50, dim=-1)
+#
+#     ix = torch.multinomial(top_probs, 1)
+#
+#     # gagther the corrospunding indicies
+#     xcol = torch.gather(top_indices, -1, ix)  # B, 1
+#
+#     x = torch.cat((x, xcol), dim=1)
+
 
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
     t0 = time.time()
     optimizer.zero_grad()
     loss_accum = 0.0
-    for _ in range(gradient_accumm_steps):
+    for micro_step in range(gradient_accumm_steps):
         x, y = data_loader.get_next_batch()
         x, y = x.to(device), y.to(device)
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             logits, loss = model(x, y)
         loss = loss / gradient_accumm_steps
         loss_accum += loss.detach()
-        loss.backward()
+        if dpp and micro_step != gradient_accumm_steps - 1:
+            with model.no_sync():
+                loss.backward()
+        else:
+            loss.backward()
+        if dpp:
+            dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
     norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
     optimizer.step()
     scheduler.step()
@@ -299,5 +328,10 @@ for i in range(steps):
     current_lr = scheduler.get_last_lr()[0]
     # synchronize is called because GPU operations are asyn and Cuda can pass output to CPU before it finishes its tasks
     torch.cuda.synchronize()
-    print(
-        f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}, time: {dt*1000:.2f} ms")
+    tokens_processed = data_loader.B * data_loader.T * dpp_world_size * gradient_accumm_steps
+    if master_process:
+        print(
+            f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}, time: {dt * 1000:.2f} ms, tokens: {tokens_processed}")
+
+if dpp:
+    dist.destroy_process_group()
