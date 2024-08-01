@@ -1,4 +1,5 @@
 import inspect
+import time
 from dataclasses import dataclass
 
 import torch
@@ -280,6 +281,7 @@ optimizer = model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, devi
 
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
+    t0 = time.time()
     optimizer.zero_grad()
     loss_accum = 0.0
     for _ in range(gradient_accumm_steps):
@@ -293,8 +295,9 @@ for i in range(steps):
     norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
     optimizer.step()
     scheduler.step()
+    dt = time.time() - t0
     current_lr = scheduler.get_last_lr()[0]
     # synchronize is called because GPU operations are asyn and Cuda can pass output to CPU before it finishes its tasks
     torch.cuda.synchronize()
     print(
-        f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}")
+        f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}, time: {dt*1000:.2f} ms")
