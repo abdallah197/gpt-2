@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import transformers
 from torch.nn import functional as F
-from torch.nn.parallel import DistributedDataParallel as ddp
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 @dataclass
@@ -275,7 +275,7 @@ if torch.cuda.is_available():
 model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)
 model = torch.compile(model)
-model = ddp(model, device_ids=[ddp_local_rank])
+model = DDP(model, device_ids=[ddp_local_rank])
 raw_model = model.module
 
 optimizer = raw_model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
