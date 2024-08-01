@@ -303,6 +303,7 @@ data_loader = DataLoaderLite(B=B, T=T, tokenizer=tokenizer, rank_process=ddp_ran
 #
 #     x = torch.cat((x, xcol), dim=1)
 
+device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=steps, eta_min=min_lr)
 for i in range(steps):
@@ -312,7 +313,7 @@ for i in range(steps):
     for micro_step in range(gradient_accumm_steps):
         x, y = data_loader.get_next_batch()
         x, y = x.to(device), y.to(device)
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
             logits, loss = model(x, y)
         loss = loss / gradient_accumm_steps
         loss_accum += loss.detach()
