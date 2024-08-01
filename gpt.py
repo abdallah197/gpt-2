@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import transformers
 from torch.nn import functional as F
-from torch.nn.parallel import DistributedDataParallel as DPP
+from torch.nn.parallel import DistributedDataParallel as ddp
 
 
 @dataclass
@@ -235,16 +235,16 @@ class DataLoaderLite:
 #     decoded = tokenizer(entry)
 #     print(decoded)
 
-dpp = int(os.environ.get('RANK', -1)) != -1
+ddp = int(os.environ.get('RANK', -1)) != -1
 
-if dpp:
+if ddp:
     dist.init_process_group("nccl")
-    dpp_world_size = int(os.environ['WORLD_SIZE'])
-    dpp_local_rank = int(os.environ['LOCAL_RANK'])
-    dpp_rank = int(os.environ['RANK'])
-    device = f'cuda:{dpp_local_rank}'
+    ddp_world_size = int(os.environ['WORLD_SIZE'])
+    ddp_local_rank = int(os.environ['LOCAL_RANK'])
+    ddp_rank = int(os.environ['RANK'])
+    device = f'cuda:{ddp_local_rank}'
     torch.cuda.set_device(device)
-    master_process = dpp_rank == 0
+    master_process = ddp_rank == 0
 else:
     device = 'cpu'
     if torch.cuda.is_available():
@@ -252,15 +252,15 @@ else:
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         device = "mps"
     print(f"using device: {device}")
-    dpp_world_size = 1
-    dpp_local_rank = 0
+    ddp_world_size = 1
+    ddp_local_rank = 0
     master_process = True
 
 total_batch_size = 524288  # num of tokens in one batch, 2**19, 0.5M in num of tokens
 B = 16
 T = 1024
-assert total_batch_size % (B * T * dpp_world_size) == 0
-gradient_accumm_steps = total_batch_size // (B * T * dpp_world_size)
+assert total_batch_size % (B * T * ddp_world_size) == 0
+gradient_accumm_steps = total_batch_size // (B * T * ddp_world_size)
 tokenizer = transformers.AutoTokenizer.from_pretrained('openai-community/gpt2')
 
 steps = 50
@@ -275,7 +275,7 @@ if torch.cuda.is_available():
 model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)
 model = torch.compile(model)
-model = DPP(model, device_ids=[dpp_local_rank])
+model = ddp(model, device_ids=[ddp_local_rank])
 raw_model = model.module
 
 optimizer = raw_model.configue_optimizers(weight_decay=weight_decay, lr=max_lr, device=device)
@@ -283,7 +283,7 @@ tokens = tokenizer('Hello I am a language model, ', return_tensors='pt')['input_
 max_length = 30
 num_sequences = 5
 tokens = tokens.repeat(5, 1)
-data_loader = DataLoaderLite(B=B, T=T, tokenizer=tokenizer, rank_process=dpp_rank, num_processes=dpp_world_size)
+data_loader = DataLoaderLite(B=B, T=T, tokenizer=tokenizer, rank_process=ddp_rank, num_processes=ddp_world_size)
 
 # x = tokens.to(device)
 # while x.size(1) < max_length:
@@ -316,12 +316,12 @@ for i in range(steps):
             logits, loss = model(x, y)
         loss = loss / gradient_accumm_steps
         loss_accum += loss.detach()
-        if dpp and micro_step != gradient_accumm_steps - 1:
+        if ddp and micro_step != gradient_accumm_steps - 1:
             with model.no_sync():
                 loss.backward()
         else:
             loss.backward()
-        if dpp:
+        if ddp:
             dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
     norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
     optimizer.step()
@@ -330,11 +330,11 @@ for i in range(steps):
     current_lr = scheduler.get_last_lr()[0]
     # synchronize is called because GPU operations are asyn and Cuda can pass output to CPU before it finishes its tasks
     torch.cuda.synchronize()
-    tokens_processed = data_loader.B * data_loader.T * dpp_world_size * gradient_accumm_steps
+    tokens_processed = data_loader.B * data_loader.T * ddp_world_size * gradient_accumm_steps
     tok_per_sec = tokens_processed / dt
     if master_process:
         print(
             f"Loss: {loss_accum.item():0.4f}, Step: {i}, Norm: {norm:.4f}, Lr: {current_lr:.6f}, time: {dt * 1000:.2f} ms, tok/sec: {tok_per_sec:.2f}")
 
-if dpp:
+if ddp:
     dist.destroy_process_group()
